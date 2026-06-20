@@ -504,7 +504,7 @@ function renderMarketRows() {
     const cls = r.changePct >= 0 ? 'gain' : 'loss';
     return `<tr>
       <td><a href="${psxUrl(r.symbol)}" target="_blank" rel="noopener" title="View ${escapeHtml(r.symbol)} on PSX"><span class="sym">${escapeHtml(r.symbol)}</span> <i class="ti ti-external-link" style="font-size:10px;color:var(--ink-soft)"></i></a>${owned.has(r.symbol)?' <span class="owned-badge">● owned</span>':''}</td>
-      <td class="muted" style="max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(r.name)}</td>
+      <td class="muted col-hide-sm" style="max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(r.name)}</td>
       <td><span class="sec">${escapeHtml(mapSector(r.sector))}</span></td>
       <td class="mono">${fmt(r.price)}</td>
       <td class="mono ${cls}">${pct(r.changePct)}</td>
@@ -515,7 +515,7 @@ function renderMarketRows() {
   const filtered = q || state.mkt.sector !== 'All';
   body.innerHTML = list.length ? `
     <div class="table-wrap mkt-scroll"><table>
-      <thead><tr><th>Symbol</th><th>Company</th><th>Sector</th><th>Price</th><th>Chg%</th><th></th></tr></thead>
+      <thead><tr><th>Symbol</th><th class="col-hide-sm">Company</th><th>Sector</th><th>Price</th><th>Chg%</th><th></th></tr></thead>
       <tbody>${rows}</tbody>
     </table></div>
     <div class="mkt-foot muted">${list.length} ${list.length===1?'company':'companies'}${filtered?' · filtered':''}</div>

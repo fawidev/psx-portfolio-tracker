@@ -126,9 +126,13 @@ hr{border:none;border-top:1px solid var(--line);margin:0}
 .chip-new:hover{color:var(--accent); border-color:var(--accent)}
 
 /* tabs */
+.tabbar{
+  display:flex; align-items:center; gap:14px;
+  border-bottom:1px solid var(--line); margin-bottom:24px;
+}
 .tabs{
-  display:flex; gap:0; border-bottom:1px solid var(--line);
-  margin-bottom:24px; overflow-x:auto;
+  display:flex; gap:0; overflow-x:auto; flex:1;
+  -webkit-overflow-scrolling:touch;
 }
 .tab{
   padding:14px 4px; margin-right:28px; position:relative;
@@ -142,7 +146,7 @@ hr{border:none;border-top:1px solid var(--line);margin:0}
   content:""; position:absolute; left:0; right:0; bottom:-1px; height:2px;
   background:var(--accent);
 }
-.tab-actions{margin-left:auto; display:flex; gap:8px; padding-bottom:8px}
+.tab-actions{display:flex; gap:8px; flex-shrink:0; padding-bottom:8px}
 
 /* page header inside tabs */
 .page-head{
@@ -186,7 +190,7 @@ hr{border:none;border-top:1px solid var(--line);margin:0}
 .chart svg{width:100%; display:block}
 
 /* ─────────────  TABLE  ───────────── */
-.table-wrap{overflow-x:auto}
+.table-wrap{overflow-x:auto; -webkit-overflow-scrolling:touch}
 table{width:100%; border-collapse:collapse; font-size:13px}
 thead th{
   text-align:left; padding:10px 12px; font:600 10px var(--mono);
@@ -318,3 +322,43 @@ td .sec{font:500 10px var(--mono); letter-spacing:.1em; text-transform:uppercase
 .footnote{margin-top:48px; padding-top:20px; border-top:1px solid var(--line);
   font:500 10px var(--mono); letter-spacing:.16em; text-transform:uppercase; color:var(--ink-soft);
   display:flex; justify-content:space-between; flex-wrap:wrap; gap:10px}
+
+/* ─────────────  RESPONSIVE / MOBILE  ─────────────
+   Viewport meta (in index.html) makes the browser report real device width,
+   so these breakpoints adapt every section. Theme/tokens are unchanged. */
+@media (max-width: 768px){
+  .topbar{padding:12px 14px; gap:10px}
+  .brand-tag{display:none}
+  .user{padding:4px 6px 4px 4px; gap:6px}
+  .user .name{display:none}                 /* keep avatar + logout, drop name to save room */
+  .wrap{padding:18px 14px 56px}
+
+  .login-card{padding:30px 22px}
+  .login-card h1{font-size:clamp(32px, 9vw, 48px)}
+  .login-meta{gap:12px}
+
+  /* Tabs scroll on their own row; portfolio actions drop below them */
+  .tabbar{flex-direction:column; align-items:stretch; gap:0}
+  .tabs{border-bottom:1px solid var(--line)}
+  .tab-actions{padding:10px 0 0; justify-content:flex-end}
+  .tab{margin-right:20px}
+
+  .page-head h2{font-size:27px}
+  .metric .val{font-size:26px}
+
+  /* Market controls stack: full-width search, selects share a row */
+  .mkt-controls .search{min-width:100%; order:-1}
+  .mkt-controls select{flex:1; min-width:0}
+
+  thead th, tbody td{padding:9px 10px}
+  .modal{padding:20px; max-height:90vh; overflow-y:auto}
+}
+
+@media (max-width: 480px){
+  body{font-size:13.5px}
+  .page-head h2{font-size:23px}
+  .metric .val{font-size:24px}
+  .col-hide-sm{display:none}                /* hide long Company column on phones */
+  .brand-mark{font-size:19px}
+  .btn{padding:9px 12px}
+}

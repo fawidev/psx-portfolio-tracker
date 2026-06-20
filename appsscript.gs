@@ -412,21 +412,46 @@ function getMarketWatch() {
   var cached = cache.get('marketwatch');
   if (cached) return JSON.parse(cached);
 
-  var opts = { muteHttpExceptions: true, headers: { 'User-Agent': 'Mozilla/5.0' } };
-
-  // Company name + friendly sector name keyed by symbol.
-  var meta = {};
-  try {
-    var syms = JSON.parse(UrlFetchApp.fetch('https://dps.psx.com.pk/symbols', opts).getContentText());
-    syms.forEach(function (s) { meta[s.symbol] = { name: s.name, sector: s.sectorName }; });
-  } catch (e) { /* names/sectors are best-effort */ }
-
-  var html = UrlFetchApp.fetch('https://dps.psx.com.pk/market-watch', opts).getContentText();
+  // PSX (dps.psx.com.pk) blocks Google's egress IPs, so a direct UrlFetchApp
+  // call throws "Address unavailable". We route through the Jina reader relay,
+  // which PSX answers; X-Return-Format:html gives us the raw page (not markdown).
+  var meta = getSymbolMeta_(cache);
+  var html = relayFetch_('https://dps.psx.com.pk/market-watch');
   var rows = parseMarketWatch(html, meta);
+  if (!rows.length) throw new Error('Could not read PSX market watch (source may be temporarily unavailable)');
 
   // CacheService caps a single value at 100KB — skip caching if it overflows.
   try { cache.put('marketwatch', JSON.stringify(rows), 600); } catch (e) {}
   return rows;
+}
+
+/** Fetch a URL through the Jina reader relay and return the raw page text. */
+function relayFetch_(url) {
+  var res = UrlFetchApp.fetch('https://r.jina.ai/' + url, {
+    muteHttpExceptions: true,
+    headers: { 'X-Return-Format': 'html', 'Accept': '*/*' }
+  });
+  return res.getContentText();
+}
+
+/** Company name + friendly sector name keyed by symbol. Cached 6 h (rarely changes). */
+function getSymbolMeta_(cache) {
+  var hit = cache.get('psx_symbols');
+  if (hit) { try { return JSON.parse(hit); } catch (e) {} }
+
+  var meta = {};
+  try {
+    var raw = relayFetch_('https://dps.psx.com.pk/symbols');
+    var a = raw.indexOf('['), b = raw.lastIndexOf(']');
+    if (a >= 0 && b > a) {
+      JSON.parse(raw.substring(a, b + 1)).forEach(function (s) {
+        if (s && s.symbol) meta[s.symbol] = { name: s.name, sector: s.sectorName };
+      });
+    }
+  } catch (e) { /* names/sectors are best-effort — market-watch data-title is a fallback */ }
+
+  try { cache.put('psx_symbols', JSON.stringify(meta), 21600); } catch (e) {}
+  return meta;
 }
 
 function parseMarketWatch(html, meta) {
@@ -455,9 +480,10 @@ function parseMarketWatch(html, meta) {
     var changePct = parseFloat((tds[9] || '').replace(/[^0-9.\-]/g, '')) || 0;
 
     var info = meta[symbol] || {};
+    var titleMatch = tr.match(/data-title="([^"]*)"/);   // company name embedded in the row
     out.push({
       symbol: symbol,
-      name: info.name || symbol,
+      name: info.name || (titleMatch ? titleMatch[1] : symbol),
       sector: info.sector || '',
       indexes: listedIn,
       price: current || ldcp,

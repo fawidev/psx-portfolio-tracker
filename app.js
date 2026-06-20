@@ -83,10 +83,14 @@ async function api(action, payload={}) {
 }
 
 /* Load + cache live PSX market data for the session. */
+function decodeEnt(s){
+  return String(s??'').replace(/&amp;/g,'&').replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&#39;/g,"'").replace(/&quot;/g,'"');
+}
+
 async function loadMarket(force=false){
   if (!force && state.market && (Date.now() - state.marketAt) < MARKET_TTL) return state.market;
   const rows = await api('getMarketWatch');
-  state.market = Array.isArray(rows) ? rows : [];
+  state.market = (Array.isArray(rows) ? rows : []).map(r => ({ ...r, name: decodeEnt(r.name), sector: decodeEnt(r.sector) }));
   state.marketAt = Date.now();
   return state.market;
 }

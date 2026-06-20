@@ -478,6 +478,7 @@ function parseMarketWatch(html, meta) {
     var current = parseFloat((tds[7] || '').replace(/,/g, '')) || 0;
     var change  = parseFloat((tds[8] || '').replace(/[^0-9.\-]/g, '')) || 0;
     var changePct = parseFloat((tds[9] || '').replace(/[^0-9.\-]/g, '')) || 0;
+    var volume  = parseFloat((tds[10] || '').replace(/[^0-9.\-]/g, '')) || 0;
 
     var info = meta[symbol] || {};
     var titleMatch = tr.match(/data-title="([^"]*)"/);   // company name embedded in the row
@@ -488,7 +489,8 @@ function parseMarketWatch(html, meta) {
       indexes: listedIn,
       price: current || ldcp,
       change: change,
-      changePct: changePct
+      changePct: changePct,
+      volume: volume
     });
   }
   return out;

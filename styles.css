@@ -318,6 +318,112 @@ td .sec{font:500 10px var(--mono); letter-spacing:.1em; text-transform:uppercase
 .mkt-foot{padding:12px; font:500 10px var(--mono); letter-spacing:.16em; text-transform:uppercase; border-top:1px solid var(--line)}
 .mkt-controls .btn.sm i{font-size:15px}
 
+/* ─────────────  STRATEGY  ───────────── */
+.bucket{
+  display:inline-flex; align-items:center;
+  font:600 10px var(--mono); letter-spacing:.08em; text-transform:uppercase;
+  padding:2px 8px; border-radius:999px; border:1px solid var(--line); color:var(--ink-soft);
+}
+.bucket.core{color:var(--btn);  border-color:color-mix(in oklab, var(--btn) 35%, var(--line));  background:color-mix(in oklab, var(--btn) 8%, transparent)}
+.bucket.growth{color:var(--info); border-color:color-mix(in oklab, var(--info) 35%, var(--line)); background:color-mix(in oklab, var(--info) 8%, transparent)}
+.bucket.opp{color:var(--gold);  border-color:color-mix(in oklab, var(--gold) 38%, var(--line)); background:color-mix(in oklab, var(--gold) 10%, transparent)}
+
+.rule-card{padding:22px 24px; margin-bottom:18px}
+.rule-card h3{margin:0 0 4px; font:600 15px var(--sans); display:flex; align-items:center; gap:8px}
+.rule-card h3 i{color:var(--accent)}
+.rules-grid{display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:12px; margin-bottom:18px}
+.rule-item{border:1px solid var(--line); border-radius:10px; padding:14px; background:var(--bg-2)}
+.rule-item .bucket{margin-bottom:8px}
+.rule-item p{margin:0; font-size:12.5px; color:var(--ink-soft); line-height:1.55}
+.rule-list{margin:0; padding-left:18px; display:flex; flex-direction:column; gap:8px}
+.rule-list li{font-size:13px; color:var(--ink-soft); line-height:1.55}
+.rule-list li b{color:var(--ink)}
+
+.strat-input{display:flex; gap:18px; align-items:flex-end; flex-wrap:wrap; padding:18px 22px; margin-bottom:22px}
+.strat-input .field{gap:7px}
+.strat-input .amt-field{width:220px}
+.strat-input .amt-field input{height:44px}
+.strat-input #stratRefresh{height:44px}
+.strat-hint{flex-basis:100%; font:500 12px var(--sans); color:var(--ink-soft); line-height:1.5; margin-top:2px}
+.seg{display:inline-flex; height:44px; border:1px solid var(--line); border-radius:8px; overflow:hidden; width:fit-content}
+.seg button{display:flex; align-items:center; padding:0 16px; font:600 12px var(--sans); color:var(--ink-soft); background:var(--card); border-right:1px solid var(--line); transition:.15s}
+.seg button:last-child{border-right:none}
+.seg button:hover{color:var(--ink)}
+.seg button.active{background:var(--btn); color:#fff}
+
+.drift-flag{font:600 10px var(--mono); padding:1px 5px; border-radius:4px; margin-left:4px}
+.drift-flag.over{color:var(--loss);  background:color-mix(in oklab, var(--loss) 14%, transparent)}
+.drift-flag.under{color:var(--info); background:color-mix(in oklab, var(--info) 14%, transparent)}
+.drift-note{
+  display:flex; align-items:center; gap:8px; margin-top:14px; padding:11px 14px; border-radius:10px;
+  font:500 13px var(--sans); color:var(--loss);
+  background:color-mix(in oklab, var(--loss) 8%, transparent);
+  border:1px solid color-mix(in oklab, var(--loss) 30%, var(--line));
+}
+.drift-note.ok{color:var(--gain); background:color-mix(in oklab, var(--gain) 8%, transparent); border-color:color-mix(in oklab, var(--gain) 30%, var(--line))}
+.drift-note i{font-size:18px}
+.drift-note .mono{font-family:var(--mono)}
+
+/* ── Strategy catalog: categories → list → detail ── */
+.strat-back{
+  display:inline-flex; align-items:center; gap:6px; margin-bottom:14px;
+  font:600 12px var(--mono); letter-spacing:.04em; color:var(--ink-soft);
+  padding:6px 10px; border:1px solid var(--line); border-radius:8px; background:var(--card); transition:.15s;
+}
+.strat-back:hover{color:var(--accent); border-color:var(--accent)}
+
+/* category cards */
+.cat-grid{display:grid; grid-template-columns:1fr 1fr; gap:16px}
+.cat-card{
+  text-align:left; padding:26px 24px; border:1px solid var(--line); border-radius:var(--radius);
+  background:var(--card); transition:.18s; display:flex; flex-direction:column; gap:10px;
+}
+.cat-card:hover{border-color:var(--accent); transform:translateY(-2px); box-shadow:0 8px 28px -18px var(--ink)}
+.cat-top{display:flex; align-items:center; justify-content:space-between}
+.cat-top i{font-size:30px; color:var(--accent)}
+.cat-count{font:500 10px var(--mono); letter-spacing:.16em; text-transform:uppercase; color:var(--ink-soft)}
+.cat-card h3{margin:4px 0 0; font:800 26px var(--serif); letter-spacing:-.01em}
+.cat-card p{margin:0; color:var(--ink-soft); font-size:13.5px; line-height:1.55; max-width:46ch}
+.cat-names{display:flex; flex-wrap:wrap; gap:6px; margin-top:4px}
+.cat-names span{font:500 10.5px var(--mono); letter-spacing:.04em; color:var(--ink-soft);
+  padding:3px 8px; border:1px solid var(--line); border-radius:999px; background:var(--bg-2)}
+.cat-go{margin-top:8px; display:inline-flex; align-items:center; gap:6px; font:600 12px var(--sans); color:var(--btn)}
+.cat-card:hover .cat-go{gap:9px}
+
+/* building-blocks tag */
+.bb-tag{display:inline-block; margin-bottom:8px; font:600 10px var(--mono); letter-spacing:.14em;
+  text-transform:uppercase; color:var(--accent)}
+
+/* strategy list cards */
+.strat-grid{display:grid; grid-template-columns:repeat(auto-fill,minmax(290px,1fr)); gap:16px}
+.strat-card{
+  text-align:left; padding:20px; border:1px solid var(--line); border-radius:var(--radius);
+  background:var(--card); transition:.18s; display:flex; flex-direction:column; gap:9px;
+}
+.strat-card:hover{border-color:var(--accent); transform:translateY(-2px); box-shadow:0 8px 28px -18px var(--ink)}
+.strat-card-top{display:flex; align-items:center; justify-content:space-between}
+.strat-ic{display:grid; place-items:center; width:40px; height:40px; border-radius:10px;
+  background:var(--bg-2); border:1px solid var(--line)}
+.strat-ic i{font-size:20px; color:var(--accent)}
+.strat-card h3{margin:2px 0 0; font:700 19px var(--serif); letter-spacing:-.01em; display:flex; align-items:center; gap:6px}
+.strat-tag{font:500 10px var(--mono); letter-spacing:.14em; text-transform:uppercase; color:var(--ink-soft)}
+.strat-idea{margin:2px 0 0; color:var(--ink-soft); font-size:13px; line-height:1.55}
+.basis-mini{display:flex; flex-direction:column; gap:5px; margin-top:2px}
+.basis-mini div{display:flex; gap:6px; font-size:12px; color:var(--ink-soft); line-height:1.45}
+.basis-mini i{font-size:13px; color:var(--accent); flex-shrink:0; margin-top:1px}
+.strat-go{margin-top:auto; padding-top:8px; display:inline-flex; align-items:center; gap:6px;
+  font:600 12px var(--sans); color:var(--btn)}
+.strat-card:hover .strat-go{gap:9px}
+
+/* detail explainer */
+.strat-idea-lg{margin:2px 0 14px; font-size:14px; line-height:1.6; color:var(--ink); max-width:80ch}
+.formula-row{display:flex; flex-wrap:wrap; gap:8px; margin:16px 0 4px}
+.formula-chip{font:500 12px var(--mono); padding:6px 11px; border-radius:8px; color:var(--ink);
+  background:var(--bg-2); border:1px solid var(--line)}
+.rebal-line{margin-top:16px; padding-top:14px; border-top:1px solid var(--line);
+  font-size:13px; color:var(--ink-soft); line-height:1.5}
+.rebal-line i{color:var(--accent); margin-right:4px}
+
 /* footnote */
 .footnote{margin-top:48px; padding-top:20px; border-top:1px solid var(--line);
   font:500 10px var(--mono); letter-spacing:.16em; text-transform:uppercase; color:var(--ink-soft);
@@ -352,6 +458,13 @@ td .sec{font:500 10px var(--mono); letter-spacing:.1em; text-transform:uppercase
 
   thead th, tbody td{padding:9px 10px}
   .modal{padding:20px; max-height:90vh; overflow-y:auto}
+
+  /* Strategy: stack the input row, fields go full width */
+  .strat-input{gap:14px}
+  .strat-input .field{max-width:100% !important; width:100%}
+  .seg{width:100%}
+  .seg button{flex:1}
+  .cat-grid{grid-template-columns:1fr}      /* stack category cards on phones */
 }
 
 @media (max-width: 480px){

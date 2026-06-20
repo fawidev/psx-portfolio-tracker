@@ -16,11 +16,329 @@ const state = {
   market: null,        // cached market-watch rows for the session
   marketAt: 0,         // timestamp of last market fetch
   mkt: { q:'', sector:'All', sort:'change' },   // Market tab filters
+  strat: { view:'categories', category:null, stratId:null, amount:null }, // Strategy tab: catalog nav + invest amount
 };
 
 const SECTORS = ['Banking','Energy','Fertilizer','Cement','Tech','Auto','Textile','Pharma','Food','Other'];
 const INDEXES = ['KSE-100','KMI-30','KSE-30','PSX All Share','Custom'];
 const SIP_WEIGHTS = { Banking:30, Energy:20, Fertilizer:20, Cement:15, Other:15 };
+
+/* ── Strategy catalog ───────────────────────────────
+   A pick-a-category → pick-a-strategy → see-your-split flow.
+   The PSX market-watch feed gives us price, % change, sector and index
+   membership — but NO fundamentals (P/E, ROE, dividend yield, market cap).
+   So strategies that lean on fundamentals use a CURATED PSX universe with
+   preset weights + a human-readable signal; the ones that can be computed
+   from live data (Equal-Weight, Momentum) are built on the fly from the feed.
+   Live prices are only ever used to turn a PKR amount into a share count. */
+
+// Symbol → [display name, sector] for everything the catalog references.
+const STOCK_META = {
+  MEBL:['Meezan Bank','Banking'],      MCB:['MCB Bank','Banking'],          UBL:['United Bank','Banking'],
+  HBL:['Habib Bank','Banking'],        NBP:['National Bank','Banking'],     BAHL:['Bank AL Habib','Banking'],
+  FFC:['Fauji Fertilizer','Fertilizer'], EFERT:['Engro Fertilizers','Fertilizer'], ENGRO:['Engro Corporation','Fertilizer'],
+  OGDC:['Oil & Gas Dev Co','Energy'],  PPL:['Pakistan Petroleum','Energy'], MARI:['Mari Petroleum','Energy'],
+  POL:['Pakistan Oilfields','Energy'], PSO:['Pakistan State Oil','Energy'], APL:['Attock Petroleum','Energy'],
+  HUBC:['Hub Power','Power'],          LUCK:['Lucky Cement','Cement'],      DGKC:['DG Khan Cement','Cement'],
+  FCCL:['Fauji Cement','Cement'],      SYS:['Systems Limited','Tech'],      INDU:['Indus Motor (Toyota)','Auto'],
+  NESTLE:['Nestlé Pakistan','Food'],   COLG:['Colgate-Palmolive','Food'],   AGP:['AGP Limited','Pharma'],
+};
+
+/* Build one curated holding row. H('FFC', 14, '~13%') → {symbol,name,sector,weight,signal} */
+function H(sym, weight, signal=''){
+  const m = STOCK_META[sym] || [sym,'Other'];
+  return { symbol:sym, name:m[0], sector:m[1], weight, signal };
+}
+
+/* Turn a weighted list + PKR amount into allocation rows (with live price/shares). */
+function allocByWeights(list, amount){
+  return list.map(h => {
+    const q = quoteFor(h.symbol);
+    const price = q && q.price > 0 ? q.price : 0;
+    const buy = amount * h.weight / 100;
+    return { ...h, price, buy, shares: price ? Math.floor(buy/price) : 0 };
+  });
+}
+
+/* Curated → a build() that just splits by preset weights. */
+const curated = (list) => (amount) => ({ rows: allocByWeights(list, amount) });
+
+const STRATEGIES = [
+  /* ══════════ BEGINNER ══════════ */
+  {
+    id:'index', cat:'beginner', name:'Index Investing', icon:'chart-dots', risk:'Low',
+    tag:'Track the whole market', signalLabel:'Volume',
+    idea:'Don\'t pick winners — own the market. Buy the big index names in roughly their market-cap weight and let the whole KSE-100 do the work.',
+    basis:[
+      'Built on weighting by size — bigger names get a bigger slice, like the KSE-100 itself. The feed has no market cap, so we proxy it live with traded turnover (price × volume).',
+      'Passive by design: no stock-picking, no timing. You hold the most-traded index leaders and ride the market\'s long-run return.',
+      'Lowest-effort, lowest-decision strategy — ideal first step before anything more analytical.',
+    ],
+    formulas:['Weight ≈ Turnover ÷ Σ Turnover','Turnover = Price × Volume','Portfolio return = Σ (weightᵢ × returnᵢ)'],
+    rebalance:'Once a year — only to re-sync with the index. Otherwise leave it alone.',
+    build:(amount)=>{
+      // True index weighting needs market cap, which the feed lacks. We proxy
+      // it with traded turnover (price × volume) — the biggest, most-traded
+      // names get the biggest slice, recomputed live from your index.
+      const idx = companiesForIndex(activePortfolio().index).filter(r=>r.price>0 && r.volume>0);
+      const turnTotal = idx.reduce((s,r)=>s + r.price*r.volume, 0);
+      if (idx.length >= 6 && turnTotal > 0){
+        const top = idx.slice()
+          .sort((a,b)=>(b.price*b.volume)-(a.price*a.volume))
+          .slice(0,14);
+        const topTotal = top.reduce((s,r)=>s + r.price*r.volume, 0);
+        const list = top.map(r=>({
+          symbol:r.symbol, name:r.name, sector:mapSector(r.sector),
+          weight:(r.price*r.volume)/topTotal*100, signal:fmtN(r.volume),
+        }));
+        return { rows: allocByWeights(list, amount),
+          note:`Top ${top.length} ${escapeHtml(activePortfolio().index)} names by live traded turnover (price × volume), weighted by turnover share — a market-cap proxy. Refresh live prices to update.` };
+      }
+      // Fallback: no live volume (older Apps Script deployment) — approximate
+      // KSE-100 heavyweight composition with preset weights.
+      const list = [
+        H('MEBL',12),H('OGDC',9),H('FFC',9),H('ENGRO',8),H('UBL',8),H('MCB',7),H('HUBC',7),
+        H('PPL',7),H('LUCK',7),H('MARI',6),H('PSO',5),H('BAHL',5),H('SYS',5),H('EFERT',5),
+      ];
+      return { rows: allocByWeights(list, amount),
+        note:'Live volume unavailable — showing approximate KSE-100 heavyweight weights. (Redeploy the Apps Script to enable live turnover weighting.)' };
+    },
+  },
+  {
+    id:'dca', cat:'beginner', name:'Dollar-Cost Averaging', icon:'calendar-repeat', risk:'Low',
+    tag:'Same amount, every month', signalLabel:'',
+    idea:'Invest a fixed amount on a fixed schedule, no matter the price. Some months you buy high, some low — over time your average cost smooths out and timing stops mattering.',
+    basis:[
+      'Built on discipline, not prediction: equal rupees into the same core basket every single month.',
+      'Buying through ups and downs lowers your average cost — you automatically buy more shares when prices are low.',
+      'Removes the emotional trap of trying to time the market. The schedule decides for you.',
+    ],
+    formulas:['Average cost = Total invested ÷ Total shares','Shares this month = Amount ÷ Price'],
+    rebalance:'No rebalancing — just repeat the same buy every month. Consistency is the whole strategy.',
+    note:'Equal split across a stable core basket. The power is repeating this identical buy monthly.',
+    build: curated(['MEBL','FFC','OGDC','ENGRO','HUBC','LUCK','UBL','SYS'].map(s=>H(s,12.5))),
+  },
+  {
+    id:'buyhold', cat:'beginner', name:'Buy & Hold', icon:'anchor', risk:'Low',
+    tag:'Own great businesses for years', signalLabel:'Thesis',
+    idea:'Buy a handful of strong, durable companies and simply hold them for 5–10 years. Time in the market beats timing the market.',
+    basis:[
+      'Built on business quality + patience: pick wide-moat compounders and let earnings grow over years.',
+      'Very low turnover — you ignore short-term noise and avoid trading costs and bad timing.',
+      'Conviction-weighted: more money in the businesses you trust most to compound.',
+    ],
+    formulas:['CAGR = (End ÷ Start)^(1 ÷ years) − 1','Total return = price gain + dividends'],
+    rebalance:'Rarely. Only sell if the business thesis genuinely breaks — not because the price moved.',
+    build: curated([
+      H('MEBL',15,'Islamic banking leader'),H('ENGRO',12,'Diversified moat'),H('LUCK',12,'Cement #1'),
+      H('FFC',12,'Cash machine'),H('SYS',10,'Tech exporter'),H('OGDC',10,'E&P giant'),
+      H('INDU',10,'Toyota, net cash'),H('MARI',10,'Gas reserves'),H('NESTLE',9,'Consumer staple'),
+    ]),
+  },
+  {
+    id:'bluechip', cat:'beginner', name:'Blue-Chip Investing', icon:'diamond', risk:'Low',
+    tag:'Only the large & stable', signalLabel:'Div yield',
+    idea:'Stick to large, established, dividend-paying companies. Less excitement, less drama — steadier compounding and regular cash payouts.',
+    basis:[
+      'Built on size + stability + dividends: only big, profitable names with a long payout track record.',
+      'Weighted toward the steadiest dividend payers — income cushions you when prices wobble.',
+      'Earnings consistency matters more than rapid growth here.',
+    ],
+    formulas:['Dividend yield = Dividend ÷ Price','Payout ratio = Dividend ÷ Earnings'],
+    rebalance:'Review yearly. Trim a name only if it cuts its dividend or its earnings turn unreliable.',
+    note:'Dividend yields are indicative PSX ranges, not live figures.',
+    build: curated([
+      H('FFC',14,'~13%'),H('MEBL',12,'~9%'),H('MCB',11,'~10%'),H('UBL',11,'~11%'),H('ENGRO',10,'~7%'),
+      H('HUBC',10,'~11%'),H('OGDC',9,'~8%'),H('PPL',8,'~7%'),H('LUCK',8,'—'),H('INDU',7,'~9%'),
+    ]),
+  },
+  {
+    id:'equal', cat:'beginner', name:'Equal-Weight Portfolio', icon:'layout-grid', risk:'Low',
+    tag:'Same rupees in each stock', signalLabel:'',
+    idea:'Give every stock the exact same slice. No single company dominates, and you\'re not betting the outcome on one big name.',
+    basis:[
+      'Built on one rule: weight = 1 ÷ N. Every holding gets an identical share of your money.',
+      'Naturally diversified — removes concentration risk from any single stock.',
+      'This version is computed live from the most actively-traded names in your portfolio\'s index.',
+    ],
+    formulas:['Weight = 1 ÷ N','Buy per stock = Amount ÷ N'],
+    rebalance:'Every 6–12 months, top up the laggards to pull everyone back to an equal slice.',
+    build:(amount)=>{
+      const idx = companiesForIndex(activePortfolio().index).filter(r=>r.price>0);
+      if (idx.length >= 6){
+        const picks = idx.slice(0,10);
+        const w = 100/picks.length;
+        const list = picks.map(r=>({ symbol:r.symbol, name:r.name, sector:mapSector(r.sector), weight:w, signal:'' }));
+        return { rows: allocByWeights(list, amount),
+          note:`Top ${picks.length} most-traded ${escapeHtml(activePortfolio().index)} names today, each weighted 1 ÷ ${picks.length}. Refresh live prices for share counts.` };
+      }
+      const list = ['MEBL','FFC','OGDC','ENGRO','HUBC','LUCK','UBL','SYS','INDU','MARI'].map(s=>H(s,10));
+      return { rows: allocByWeights(list, amount), note:'Live index data not loaded — showing a default 10-name basket at 1 ÷ 10 each.' };
+    },
+  },
+
+  /* ══════════ MID-LEVEL ══════════ */
+  {
+    id:'value', cat:'mid', name:'Value Investing', icon:'discount', risk:'Medium',
+    tag:'Buy below intrinsic value', signalLabel:'Valuation',
+    idea:'Hunt for companies trading below what they\'re actually worth. Pay 50 paisa for a rupee of value and wait for the market to catch up.',
+    basis:[
+      'Built on cheapness: low P/E and P/B relative to peers and to the company\'s own history.',
+      'Core test — Price < intrinsic value (estimated via discounted cash flow).',
+      'You\'re buying out-of-favour names with a margin of safety, not the popular ones.',
+    ],
+    formulas:['P/E = Price ÷ Earnings','P/B = Price ÷ Book value','Intrinsic value = Σ (CFₜ ÷ (1+r)ᵗ)'],
+    rebalance:'Re-check valuations every 6 months. Sell once a name reaches fair value; rotate into the next cheap one.',
+    note:'Valuation tags are indicative PSX ranges — always verify the latest reported numbers.',
+    build: curated([
+      H('OGDC',13,'P/E ~4'),H('PPL',12,'P/E ~4'),H('PSO',11,'P/B ~0.4'),H('MCB',11,'P/E ~5'),H('HBL',10,'P/E ~4'),
+      H('FFC',10,'P/E ~6'),H('HUBC',10,'P/E ~5'),H('MARI',8,'P/E ~7'),H('DGKC',8,'P/B ~0.5'),H('NBP',7,'P/B ~0.3'),
+    ]),
+  },
+  {
+    id:'quality', cat:'mid', name:'Quality Investing', icon:'award', risk:'Medium',
+    tag:'Strong businesses over cheap ones', signalLabel:'Quality',
+    idea:'Pay a fair price for an excellent business. High returns on capital, low debt, durable margins — quality that compounds beats cheap that stagnates.',
+    basis:[
+      'Built on profitability + balance-sheet strength: high ROE/ROA and low debt-to-equity.',
+      'Core idea — a great business at a fair price beats a poor one at a cheap price.',
+      'Weighted toward the highest-return, lowest-leverage names.',
+    ],
+    formulas:['ROE = Net income ÷ Equity','ROA = Net income ÷ Assets','Debt-to-equity = Total debt ÷ Equity'],
+    rebalance:'Review every 6–12 months. Drop a name if returns on capital fade or debt creeps up.',
+    note:'Quality tags are indicative — confirm against the latest financial statements.',
+    build: curated([
+      H('MEBL',14,'ROE ~30%'),H('SYS',13,'ROE ~28%'),H('NESTLE',11,'High margin'),H('INDU',11,'Net cash'),
+      H('FFC',11,'ROE ~30%'),H('MARI',10,'ROE ~25%'),H('COLG',8,'ROE ~40%'),H('ENGRO',8,'Diversified'),
+      H('LUCK',8,'Low debt'),H('AGP',6,'Pharma quality'),
+    ]),
+  },
+  {
+    id:'momentum', cat:'mid', name:'Momentum Strategy', icon:'trending-up', risk:'Higher',
+    tag:'Ride what\'s already rising', signalLabel:'Momentum',
+    idea:'Buy what\'s going up and let winners run. Strength tends to persist in the short term — you follow the trend rather than predict it.',
+    basis:[
+      'Built on relative strength: hold the names with the strongest recent price moves.',
+      'Computed live from your index — today\'s top positive movers, equally weighted.',
+      'Higher risk: momentum can reverse fast, so this needs frequent review.',
+    ],
+    formulas:['N-day return = (Pₙₒw ÷ Pₙ days ago) − 1','Signal: price > MA20 > MA50'],
+    rebalance:'Review monthly (or sooner). Drop names that lose momentum and rotate into the new leaders.',
+    build:(amount)=>{
+      const idx = companiesForIndex(activePortfolio().index).filter(r=>r.price>0 && r.changePct>0);
+      const top = idx.slice().sort((a,b)=>(b.changePct||0)-(a.changePct||0)).slice(0,8);
+      if (top.length){
+        const w = 100/top.length;
+        const list = top.map(r=>({ symbol:r.symbol, name:r.name, sector:mapSector(r.sector), weight:w, signal:pct(r.changePct) }));
+        return { rows: allocByWeights(list, amount),
+          note:`Top ${top.length} positive movers in ${escapeHtml(activePortfolio().index)} today, equal-weighted. Momentum is proxied by today's % change (live) — true momentum uses a 3–12 month window.` };
+      }
+      const list = ['SYS','MARI','LUCK','INDU','MEBL','ENGRO'].map(s=>H(s,100/6));
+      return { rows: allocByWeights(list, amount), note:'No live up-movers found — showing a default growth basket. Refresh live prices to compute momentum.' };
+    },
+  },
+  {
+    id:'coresatellite', cat:'mid', name:'Core-Satellite', icon:'atom', risk:'Medium', signalLabel:'Bucket',
+    tag:'Stable core + growth satellites',
+    idea:'Anchor most of your money in a stable core of the market\'s biggest, most-traded names, then add smaller satellite bets for extra growth. This version screens your index live and sorts names into Core, Growth and Opportunistic buckets.',
+    basis:[
+      'Built as a two-layer portfolio: a large stable Core (~65%) plus Growth & Opportunistic satellites (~35%).',
+      'Core ≈ largest-turnover names in defensive sectors (banks, energy, fertilizer, power). Growth ≈ tech, auto & cement. Opportunistic ≈ today\'s biggest dips — buy on weakness.',
+      'Screened live from your index by traded turnover (price × volume); weights are proportional to turnover inside each bucket.',
+    ],
+    formulas:['Core 60–70% · Satellites 30–40%','Within bucket: weight ∝ turnover (price × volume)'],
+    rebalance:'Review every 6 months. Keep the Core stable; rotate the satellite sleeve more actively.',
+    build:(amount)=>{
+      const idx = companiesForIndex(activePortfolio().index).filter(r=>r.price>0 && r.volume>0);
+      const turn = r => r.price*r.volume;
+      const sec = r => mapSector(r.sector);
+      const CORE_SEC = ['Banking','Energy','Fertilizer','Power'];
+      const GROWTH_SEC = ['Tech','Auto','Cement'];
+
+      if (idx.length >= 6){
+        const byTurn = idx.slice().sort((a,b)=>turn(b)-turn(a));
+        const core   = byTurn.filter(r=>CORE_SEC.includes(sec(r))).slice(0,8);
+        const growth = byTurn.filter(r=>GROWTH_SEC.includes(sec(r))).slice(0,4);
+        const taken  = new Set([...core,...growth].map(r=>r.symbol));
+        const opp    = idx.filter(r=>!taken.has(r.symbol)).slice()
+                          .sort((a,b)=>(a.changePct||0)-(b.changePct||0)).slice(0,2);
+
+        const bucket = (arr, target, label) => {
+          const t = arr.reduce((s,r)=>s+turn(r),0) || 1;
+          return arr.map(r=>({ symbol:r.symbol, name:r.name, sector:sec(r), weight:turn(r)/t*target, signal:label }));
+        };
+        let list = [...bucket(core,65,'Core'), ...bucket(growth,25,'Growth'), ...bucket(opp,10,'Opportunistic')];
+        const wsum = list.reduce((s,r)=>s+r.weight,0) || 1;   // renormalise to 100% if a bucket came up empty
+        list = list.map(r=>({ ...r, weight:r.weight/wsum*100 }));
+        return { rows: allocByWeights(list, amount),
+          note:`Live screen of ${escapeHtml(activePortfolio().index)} — Core ≈65% (biggest-turnover banks/energy/fertilizer/power), Growth ≈25% (tech/auto/cement), Opportunistic ≈10% (today's biggest dips). Weights ∝ turnover within each bucket.` };
+      }
+      const fb = [
+        H('MEBL',10,'Core'),H('FFC',10,'Core'),H('OGDC',9,'Core'),H('UBL',8,'Core'),H('ENGRO',8,'Core'),
+        H('HUBC',7,'Core'),H('MCB',7,'Core'),H('PPL',6,'Core'),
+        H('LUCK',8,'Growth'),H('SYS',8,'Growth'),H('INDU',5,'Growth'),H('MARI',4,'Growth'),
+        H('PSO',5,'Opportunistic'),H('FCCL',5,'Opportunistic'),
+      ];
+      return { rows: allocByWeights(fb, amount),
+        note:'Live volume unavailable — showing a default Core/Growth/Opportunistic basket. (Redeploy the Apps Script to enable the live turnover screen.)' };
+    },
+  },
+  {
+    id:'sector', cat:'mid', name:'Sector Rotation', icon:'rotate', risk:'Higher',
+    tag:'Tilt toward the right cycle', signalLabel:'Cycle stance',
+    idea:'Different sectors lead at different points in the economic cycle. Overweight the sectors the macro backdrop favours and underweight the ones it doesn\'t.',
+    basis:[
+      'Built on macro signals: interest rates, inflation and GDP growth decide which sectors get more money.',
+      'No single formula — it\'s a top-down weighting of sectors, then liquid names within each.',
+      'Current tilt favours rate-sensitive banks, energy and fertilizer; cyclicals kept lighter.',
+    ],
+    formulas:['Sector weight = f(rates, inflation, GDP)','Then market-cap weight within each sector'],
+    rebalance:'Reassess each quarter as the macro picture shifts — rotate weight toward the newly-favoured sectors.',
+    note:'The cycle stance shown is an illustrative current-environment tilt, not live macro data.',
+    build: curated([
+      H('MEBL',12,'Banks ▲'),H('UBL',10,'Banks ▲'),H('FFC',12,'Fertilizer ▲'),H('ENGRO',10,'Fertilizer ▲'),
+      H('OGDC',11,'Energy ▲'),H('PPL',10,'Energy ▲'),H('HUBC',10,'Power ▲'),H('LUCK',9,'Cement ◆'),
+      H('SYS',8,'Tech ▲'),H('INDU',8,'Auto ◆'),
+    ]),
+  },
+  {
+    id:'factor', cat:'mid', name:'Factor Investing', icon:'stack-2', risk:'Medium',
+    tag:'Blend value + quality + momentum + size', signalLabel:'Score',
+    idea:'Score every stock on several proven factors at once — value, quality, momentum, size — and hold the highest composite scorers. This is how quant portfolios are built.',
+    basis:[
+      'Built on a composite score: each stock is rated on Value, Quality, Momentum and Size factors.',
+      'Composite score = weighted sum of factor scores; you hold the top names by total score.',
+      'Combining factors smooths out the rough patches any single factor goes through.',
+    ],
+    formulas:['Composite = Σ (wᵢ × factor scoreᵢ)','Factors: value · quality · momentum · size'],
+    rebalance:'Re-score and rebalance quarterly toward the highest composite scorers.',
+    note:'Composite scores (0–10) are illustrative blends of the listed factors.',
+    build: curated([
+      H('MEBL',12,'8.7'),H('FFC',11,'8.5'),H('OGDC',10,'8.1'),H('ENGRO',9,'7.9'),H('SYS',9,'7.8'),H('MCB',9,'7.6'),
+      H('LUCK',8,'7.4'),H('UBL',8,'7.3'),H('HUBC',8,'7.1'),H('MARI',7,'7.0'),H('PPL',5,'6.8'),H('INDU',4,'6.6'),
+    ]),
+  },
+  {
+    id:'dividend', cat:'mid', name:'Dividend Investing', icon:'coins', risk:'Medium',
+    tag:'Maximise cash payouts', signalLabel:'Div yield',
+    idea:'Build a portfolio of consistent, high-yield dividend payers. Get paid regular cash while you hold — useful for income, and re-investable for compounding.',
+    basis:[
+      'Built on yield + consistency: weight toward the highest, most reliable dividend payers.',
+      'Core formula — Dividend yield = Dividend ÷ Price; favour sustainable payout ratios.',
+      'Cash payouts give a steady return even in flat markets.',
+    ],
+    formulas:['Dividend yield = Dividend ÷ Price','Payout ratio = Dividend ÷ Earnings'],
+    rebalance:'Review every 6 months. Cut any name that reduces or suspends its dividend.',
+    note:'Yields are indicative PSX ranges — verify the latest declared payouts.',
+    build: curated([
+      H('FFC',15,'~13%'),H('HUBC',13,'~11%'),H('MCB',12,'~10%'),H('UBL',11,'~11%'),H('OGDC',10,'~8%'),
+      H('MEBL',9,'~9%'),H('PPL',8,'~7%'),H('EFERT',8,'~10%'),H('PSO',7,'~9%'),H('APL',7,'~10%'),
+    ]),
+  },
+];
+
+function stratById(id){ return STRATEGIES.find(s=>s.id===id); }
+const RISK_CLASS = { Low:'gain', Medium:'info', Higher:'loss' };
 
 // Friendly label <-> PSX "LISTED IN" code. Custom = no filter (all symbols).
 const INDEX_NAME = { KSE100:'KSE-100', KSE30:'KSE-30', KMI30:'KMI-30', KMIALLSHR:'KMI All Share', ALLSHR:'PSX All Share', KSE100PR:'KSE-100 PR' };
@@ -246,6 +564,7 @@ function renderEmptyState() {
 function renderTab() {
   if (!state.activePid) return renderEmptyState();
   if (state.tab === 'overview') return renderOverview();
+  if (state.tab === 'strategy') return renderStrategy();
   if (state.tab === 'holdings') return renderHoldings();
   if (state.tab === 'market')   return renderMarket();
   if (state.tab === 'invest')   return renderInvest();
@@ -624,6 +943,215 @@ async function deleteInvestment(id){
   catch(e){ toast(e.message,'err'); }
 }
 
+/* ── Strategy tab dispatcher ─────────────────────────
+   categories → list (per category) → detail (per strategy). */
+function renderStrategy(){
+  const v = state.strat.view || 'categories';
+  if (v === 'list')   return renderStrategyList();
+  if (v === 'detail') return renderStrategyDetail();
+  return renderStrategyCategories();
+}
+
+function stratGoCategories(){ state.strat.view='categories'; state.strat.category=null; renderStrategy(); }
+function stratOpenCategory(cat){ state.strat.category=cat; state.strat.view='list'; renderStrategy(); }
+function stratOpenDetail(id){ state.strat.stratId=id; state.strat.view='detail'; renderStrategy(); }
+function stratGoList(){ const s = stratById(state.strat.stratId); if (s) state.strat.category = s.cat; state.strat.view='list'; renderStrategy(); }
+
+/* Step 1 — choose Beginner or Mid-level. */
+function renderStrategyCategories(){
+  const beginner = STRATEGIES.filter(s=>s.cat==='beginner');
+  const mid      = STRATEGIES.filter(s=>s.cat==='mid');
+  const card = (cat, icon, title, blurb, list) => `
+    <button class="cat-card" data-cat="${cat}">
+      <div class="cat-top"><i class="ti ti-${icon}"></i><span class="cat-count">${list.length} strategies</span></div>
+      <h3>${title}</h3>
+      <p>${blurb}</p>
+      <div class="cat-names">${list.map(s=>`<span>${escapeHtml(s.name)}</span>`).join('')}</div>
+      <span class="cat-go">Explore ${title} <i class="ti ti-arrow-right"></i></span>
+    </button>`;
+
+  $('#main').innerHTML = `
+    <div class="page-head">
+      <div><div class="sub">Strategy · catalog</div><h2>Pick a strategy</h2></div>
+      <span class="badge info"><i class="ti ti-books"></i> ${STRATEGIES.length} strategies</span>
+    </div>
+    <p class="muted" style="margin:-6px 0 20px;max-width:80ch">Choose a category, browse the strategies inside it, then open one to see exactly how your money would split across PSX companies. Every strategy explains the basis it's built on.</p>
+    <div class="cat-grid">
+      ${card('beginner','seedling','Beginner','Simple, proven, low-risk approaches. Minimal decisions — own the market, automate your buys, hold quality for the long run.', beginner)}
+      ${card('mid','chart-histogram','Mid-level','Structured & analytical. Screen on value, quality, momentum, dividends or factors — more involved, more control.', mid)}
+    </div>
+    <div class="card rule-card" style="margin-top:22px">
+      <h3><i class="ti ti-math-function"></i> Universal building blocks</h3>
+      <p class="muted" style="margin:4px 0 16px;max-width:80ch">Every strategy below is just a different recipe over three ingredients — <b>return</b>, <b>risk</b> and <b>allocation</b>. These are the formulas they draw on:</p>
+      <div class="rules-grid">
+        <div class="rule-item"><span class="bb-tag">Valuation</span><p>P/E = Price ÷ Earnings · P/B = Price ÷ Book value</p></div>
+        <div class="rule-item"><span class="bb-tag">Profitability</span><p>ROE = Net income ÷ Equity · ROA = Net income ÷ Assets</p></div>
+        <div class="rule-item"><span class="bb-tag">Risk</span><p>Volatility (σ of returns) · Beta vs the market</p></div>
+        <div class="rule-item"><span class="bb-tag">Returns</span><p>CAGR = (End ÷ Start)^(1 ÷ yrs) − 1 · Total return = price + dividends</p></div>
+      </div>
+    </div>`;
+
+  $$('.cat-card').forEach(b => b.addEventListener('click', () => stratOpenCategory(b.dataset.cat)));
+}
+
+/* Step 2 — list the strategies in the chosen category. */
+function renderStrategyList(){
+  const cat = state.strat.category || 'beginner';
+  const isBeg = cat === 'beginner';
+  const list = STRATEGIES.filter(s=>s.cat===cat);
+  const cards = list.map(s => `
+    <button class="strat-card" data-id="${s.id}">
+      <div class="strat-card-top">
+        <span class="strat-ic"><i class="ti ti-${s.icon}"></i></span>
+        <span class="badge ${RISK_CLASS[s.risk]}">${s.risk} risk</span>
+      </div>
+      <h3>${escapeHtml(s.name)}</h3>
+      <div class="strat-tag">${escapeHtml(s.tag)}</div>
+      <p class="strat-idea">${escapeHtml(s.idea)}</p>
+      <div class="basis-mini">${s.basis.slice(0,2).map(b=>`<div><i class="ti ti-point-filled"></i> ${escapeHtml(b)}</div>`).join('')}</div>
+      <span class="strat-go">See the split <i class="ti ti-arrow-right"></i></span>
+    </button>`).join('');
+
+  $('#main').innerHTML = `
+    <button class="strat-back" id="stratBack"><i class="ti ti-arrow-left"></i> All categories</button>
+    <div class="page-head">
+      <div><div class="sub">${isBeg?'Beginner':'Mid-level'} · ${list.length} strategies</div><h2>${isBeg?'Beginner':'Mid-level'} strategies</h2></div>
+      <span class="badge ${isBeg?'gain':'info'}"><i class="ti ti-${isBeg?'seedling':'chart-histogram'}"></i> ${isBeg?'Simple & proven':'Structured & analytical'}</span>
+    </div>
+    <div class="strat-grid">${cards}</div>`;
+
+  $('#stratBack').addEventListener('click', stratGoCategories);
+  $$('.strat-card').forEach(b => b.addEventListener('click', () => stratOpenDetail(b.dataset.id)));
+}
+
+/* Step 3 — detail: explainer + amount input + live allocation table. */
+function renderStrategyDetail(){
+  const s = stratById(state.strat.stratId);
+  if (!s) return stratGoCategories();
+  return renderGenericDetail(s);
+}
+
+/* Header shared by every detail page (back link + title + risk). */
+function stratDetailHead(s){
+  return `
+    <button class="strat-back" id="stratBack"><i class="ti ti-arrow-left"></i> Back to ${s.cat==='beginner'?'Beginner':'Mid-level'}</button>
+    <div class="page-head">
+      <div><div class="sub">${s.cat==='beginner'?'Beginner':'Mid-level'} · strategy</div><h2>${escapeHtml(s.name)}</h2></div>
+      <span class="badge ${RISK_CLASS[s.risk]}"><i class="ti ti-${s.icon}"></i> ${s.risk} risk</span>
+    </div>`;
+}
+
+/* The "what it's built on" explainer card, driven by strategy data. */
+function stratBasisCard(s){
+  return `
+    <div class="card rule-card">
+      <h3><i class="ti ti-list-check"></i> What this strategy is built on</h3>
+      <p class="strat-idea-lg">${escapeHtml(s.idea)}</p>
+      <ul class="rule-list">${s.basis.map(b=>`<li>${escapeHtml(b)}</li>`).join('')}</ul>
+      <div class="formula-row">
+        ${s.formulas.map(f=>`<span class="formula-chip">${escapeHtml(f)}</span>`).join('')}
+      </div>
+      <div class="rebal-line"><i class="ti ti-refresh"></i> <b>Rebalancing:</b> ${escapeHtml(s.rebalance)}</div>
+    </div>`;
+}
+
+/* Generic detail: explainer + amount input + live allocation table. */
+function renderGenericDetail(s){
+  const p = activePortfolio();
+  const amount = state.strat.amount ?? (+p.monthlyTarget || 100000);
+  state.strat.amount = amount;
+
+  $('#main').innerHTML = `
+    ${stratDetailHead(s)}
+    ${stratBasisCard(s)}
+    <div class="card strat-input">
+      <div class="field amt-field">
+        <label>Amount to invest (PKR)</label>
+        <input id="stratAmt" type="number" inputmode="numeric" min="0" step="500" value="${amount}"/>
+      </div>
+      <button class="btn ghost sm" id="stratRefresh" onclick="refreshStrategyPrices()" title="Pull live PSX prices for share counts"><i class="ti ti-refresh"></i> Live prices</button>
+      <div class="strat-hint">Enter any amount — the table splits it across companies instantly using this strategy's weights.</div>
+    </div>
+    <div id="stratResults"></div>
+    <div class="card rule-card" style="margin-top:18px">
+      <h3><i class="ti ti-alert-hexagon"></i> Good to know</h3>
+      <ul class="rule-list">
+        <li><b>This is a framework, not advice</b> — verify each company's latest results and confirm the symbols are tradable in your brokerage before buying.</li>
+        <li><b>Share counts need live prices</b> — hit <b>Live prices</b> to pull current PSX quotes; PKR amounts work without them.</li>
+      </ul>
+    </div>`;
+
+  $('#stratBack').addEventListener('click', stratGoList);
+  // Wire the amount input ONCE; only the results re-render, so the caret stays put.
+  $('#stratAmt').addEventListener('input', e => {
+    state.strat.amount = Math.max(0, +e.target.value || 0);
+    renderGenericResults(s);
+  });
+
+  renderGenericResults(s);
+  if (!state.market) loadMarket().then(()=>{ if (state.tab==='strategy' && state.strat.view==='detail') renderGenericResults(s); }).catch(()=>{});
+}
+
+/* Re-render just the generic allocation output (summary + table). */
+function renderGenericResults(s){
+  const host = $('#stratResults'); if (!host) return;
+  const amount = state.strat.amount || 0;
+  const { rows, note: buildNote } = s.build(amount);
+  const note = buildNote || s.note;     // live builds return a note; curated ones carry it on the strategy
+  const allocated = rows.reduce((sum,r)=>sum+r.buy,0);
+  const sectors = new Set(rows.map(r=>r.sector)).size;
+  const hasSignal = !!s.signalLabel && rows.some(r=>r.signal);
+  const anyPrice = rows.some(r=>r.price>0);
+
+  const tr = rows.map(r => `
+    <tr>
+      <td>
+        <a href="${psxUrl(r.symbol)}" target="_blank" rel="noopener" title="View ${escapeHtml(r.symbol)} on PSX"><span class="sym">${escapeHtml(r.symbol)}</span> <i class="ti ti-external-link" style="font-size:10px;color:var(--ink-soft)"></i></a>
+        <div class="sec col-hide-sm">${escapeHtml(r.name)}</div>
+      </td>
+      <td><span class="sec">${escapeHtml(r.sector)}</span></td>
+      ${hasSignal?`<td class="mono">${escapeHtml(r.signal||'—')}</td>`:''}
+      <td class="mono">${(Math.round(r.weight*10)/10)}%</td>
+      <td class="mono" style="font-weight:600">${r.buy>=1?fmt(r.buy):'<span class="muted">—</span>'}</td>
+      <td class="mono">${r.price?'≈ '+fmtN(r.shares)+' <span class="muted" style="font-size:10px">@ '+fmt(r.price)+'</span>':'<span class="muted">price n/a</span>'}</td>
+      <td class="row-actions"><button class="btn sm" onclick="marketAdd('${escapeHtml(r.symbol)}')"><i class="ti ti-plus"></i> Buy</button></td>
+    </tr>`).join('');
+
+  host.innerHTML = `
+    <div class="metric-grid">
+      <div class="metric card"><span class="corner">01</span><div class="lbl">Deploying</div><div class="val">${fmt(allocated)}</div><div class="delta muted">this allocation</div></div>
+      <div class="metric card"><span class="corner">02</span><div class="lbl">Companies</div><div class="val">${rows.length}</div><div class="delta muted">across ${sectors} sector${sectors>1?'s':''}</div></div>
+      <div class="metric card"><span class="corner">03</span><div class="lbl">Largest slice</div><div class="val">${Math.max(...rows.map(r=>r.weight)).toFixed(0)}%</div><div class="delta muted">single-name cap</div></div>
+    </div>
+    ${note?`<div class="drift-note ok"><i class="ti ti-info-circle"></i> ${note}</div>`:''}
+    ${!anyPrice?`<div class="drift-note"><i class="ti ti-bolt"></i> Live prices not loaded yet — hit <b>Live prices</b> to fill in share counts.</div>`:''}
+    <div class="card" style="margin-top:18px">
+      <div class="table-wrap"><table>
+        <thead><tr>
+          <th>Stock</th><th>Sector</th>${hasSignal?`<th>${escapeHtml(s.signalLabel)}</th>`:''}<th>Weight</th><th>Buy now</th><th>Shares</th><th></th>
+        </tr></thead>
+        <tbody>${tr}</tbody>
+        <tfoot><tr>
+          <td colspan="${hasSignal?4:3}" style="padding:14px 12px;font:600 11px var(--mono);text-transform:uppercase;letter-spacing:.16em;color:var(--ink-soft);border-top:1px solid var(--line)">Total to deploy</td>
+          <td class="mono" style="font-weight:700;border-top:1px solid var(--line)">${fmt(allocated)}</td>
+          <td colspan="2" style="border-top:1px solid var(--line)"></td>
+        </tr></tfoot>
+      </table></div>
+    </div>`;
+}
+
+async function refreshStrategyPrices(){
+  const btn = $('#stratRefresh');
+  if (btn){ btn.disabled = true; btn.innerHTML = '<span class="spin"></span> Fetching…'; }
+  try { await loadMarket(true); toast('Live PSX prices loaded','ok'); }
+  catch(e){ toast('Could not fetch prices: '+e.message,'err'); }
+  if (btn){ btn.disabled = false; btn.innerHTML = '<i class="ti ti-refresh"></i> Live prices'; }
+  if (state.tab==='strategy' && state.strat.view==='detail'){
+    const s = stratById(state.strat.stratId);
+    if (s) renderGenericResults(s);
+  }
+}
+
 /* ════════════════════════════════════════════════
    MODALS
    ════════════════════════════════════════════════ */
@@ -808,3 +1336,8 @@ window.refreshPrices = refreshPrices;
 window.gotoMarket = gotoMarket;
 window.marketAdd = marketAdd;
 window.refreshMarket = refreshMarket;
+window.refreshStrategyPrices = refreshStrategyPrices;
+window.stratGoCategories = stratGoCategories;
+window.stratOpenCategory = stratOpenCategory;
+window.stratOpenDetail = stratOpenDetail;
+window.stratGoList = stratGoList;

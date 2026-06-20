@@ -15,14 +15,38 @@ const state = {
   editingPid: null,
   market: null,        // cached market-watch rows for the session
   marketAt: 0,         // timestamp of last market fetch
+  mkt: { q:'', sector:'All', sort:'change' },   // Market tab filters
 };
 
 const SECTORS = ['Banking','Energy','Fertilizer','Cement','Tech','Auto','Textile','Pharma','Food','Other'];
 const INDEXES = ['KSE-100','KMI-30','KSE-30','PSX All Share','Custom'];
 const SIP_WEIGHTS = { Banking:30, Energy:20, Fertilizer:20, Cement:15, Other:15 };
 
-// Map our index label → the PSX "LISTED IN" code. Custom = no filter (all symbols).
-const INDEX_CODE = { 'KSE-100':'KSE100', 'KMI-30':'KMI30', 'KSE-30':'KSE30', 'PSX All Share':'ALLSHR', 'Custom':null };
+// Friendly label <-> PSX "LISTED IN" code. Custom = no filter (all symbols).
+const INDEX_NAME = { KSE100:'KSE-100', KSE30:'KSE-30', KMI30:'KMI-30', KMIALLSHR:'KMI All Share', ALLSHR:'PSX All Share', KSE100PR:'KSE-100 PR' };
+const INDEX_CODE = { 'KSE-100':'KSE100', 'KSE-30':'KSE30', 'KMI-30':'KMI30', 'KMI All Share':'KMIALLSHR', 'PSX All Share':'ALLSHR', 'KSE-100 PR':'KSE100PR', 'Custom':null };
+
+function codeForIndexLabel(label){
+  if (label === 'Custom' || !label) return null;
+  if (label in INDEX_CODE) return INDEX_CODE[label];
+  return label;   // label may already be a raw PSX code
+}
+
+/* Index labels available to pick — derived from the live market data when loaded,
+   else the static fallback list. */
+function availableIndexes(){
+  const counts = {};
+  (state.market || []).forEach(r => (r.indexes || []).forEach(c => { counts[c] = (counts[c]||0) + 1; }));
+  const codes = Object.keys(counts).filter(c => counts[c] >= 10);
+  if (!codes.length) return INDEXES.slice();
+  const order = ['KSE100','KSE30','KMI30','KMIALLSHR','ALLSHR'];
+  const ordered = order.filter(c => counts[c]).concat(codes.filter(c => !order.includes(c)).sort());
+  return ordered.map(c => INDEX_NAME[c] || c).concat('Custom');
+}
+
+function indexOptions(selected){
+  return availableIndexes().map(l => `<option ${l===selected?'selected':''}>${escapeHtml(l)}</option>`).join('');
+}
 
 const MARKET_TTL = 10 * 60 * 1000;   // reuse market data for 10 min in-session
 
@@ -99,7 +123,7 @@ async function loadMarket(force=false){
    activity (most active first), so we preserve that order — "top of the list"
    = most actively traded today. */
 function companiesForIndex(indexLabel){
-  const code = INDEX_CODE[indexLabel];
+  const code = codeForIndexLabel(indexLabel);
   const all = state.market || [];
   return code ? all.filter(r => r.indexes && r.indexes.includes(code)) : all.slice();
 }
@@ -223,9 +247,12 @@ function renderTab() {
   if (!state.activePid) return renderEmptyState();
   if (state.tab === 'overview') return renderOverview();
   if (state.tab === 'holdings') return renderHoldings();
+  if (state.tab === 'market')   return renderMarket();
   if (state.tab === 'invest')   return renderInvest();
   if (state.tab === 'history')  return renderHistory();
 }
+
+function gotoMarket(){ state.tab = 'market'; updateTabs(); renderTab(); }
 
 /* ── Tab: Overview ─────────────────────────────── */
 function renderOverview() {
@@ -354,7 +381,7 @@ function renderHoldings() {
       </div>
       <div class="row" style="gap:8px">
         <button class="btn ghost" id="refreshBtn" onclick="refreshPrices()"><i class="ti ti-refresh"></i> Refresh prices</button>
-        <button class="btn" onclick="holdingModal()"><i class="ti ti-plus"></i> Add stock</button>
+        <button class="btn" onclick="gotoMarket()"><i class="ti ti-plus"></i> Add stock</button>
       </div>
     </div>
     <div class="card">
@@ -368,8 +395,8 @@ function renderHoldings() {
       <div class="empty">
         <i class="ti ti-chart-candle"></i>
         <h4>No holdings yet</h4>
-        <p>Add your first stock to start tracking P&amp;L.</p>
-        <button class="btn" onclick="holdingModal()"><i class="ti ti-plus"></i> Add stock</button>
+        <p>Browse the ${escapeHtml(activePortfolio().index)} companies and add your first position.</p>
+        <button class="btn" onclick="gotoMarket()"><i class="ti ti-plus"></i> Browse market</button>
       </div>`}
     </div>
   `;
@@ -415,6 +442,100 @@ async function deleteHolding(id){
   if (!confirm('Delete this holding?')) return;
   try { await api('deleteHolding',{id}); state.holdings = state.holdings.filter(h=>h.id!==id); renderHoldings(); toast('Deleted','ok'); }
   catch(e){ toast(e.message,'err'); }
+}
+
+/* ── Tab: Market (browse the index, click to add) ───── */
+function renderMarket() {
+  const p = activePortfolio();
+  $('#main').innerHTML = `
+    <div class="page-head">
+      <div><div class="sub">Tab 03 · Market</div><h2>Browse ${escapeHtml(p.index === 'Custom' ? 'all PSX' : p.index)}</h2></div>
+      <button class="btn ghost sm" onclick="addHoldingModal()"><i class="ti ti-plus"></i> Custom symbol</button>
+    </div>
+    <div class="mkt-controls">
+      <input class="search" id="mktSearch" type="search" placeholder="Search symbol or company…" value="${escapeHtml(state.mkt.q)}"/>
+      <select id="mktSector"><option>All sectors</option></select>
+      <select id="mktSort">
+        <option value="change">Sort · % change</option>
+        <option value="price">Sort · price</option>
+        <option value="symbol">Sort · symbol</option>
+      </select>
+      <button class="btn ghost sm" id="mktRefresh" onclick="refreshMarket()" title="Refresh prices"><i class="ti ti-refresh"></i></button>
+    </div>
+    <div class="card"><div id="mktBody"><div class="fullspin"><span class="spin"></span></div></div></div>
+  `;
+
+  $('#mktSort').value = state.mkt.sort;
+  $('#mktSearch').addEventListener('input', e => { state.mkt.q = e.target.value; renderMarketRows(); });
+  $('#mktSort').addEventListener('change', e => { state.mkt.sort = e.target.value; renderMarketRows(); });
+
+  loadMarket().then(() => { buildSectorFilter(p.index); renderMarketRows(); })
+    .catch(e => {
+      $('#mktBody').innerHTML = `<div class="empty"><i class="ti ti-cloud-off"></i><h4>Couldn't load market data</h4><p>${escapeHtml(e.message)}</p><button class="btn" onclick="refreshMarket()">Retry</button></div>`;
+    });
+}
+
+function buildSectorFilter(index) {
+  const buckets = [...new Set(companiesForIndex(index).map(r => mapSector(r.sector)))].sort();
+  const sel = $('#mktSector');
+  if (!sel) return;
+  sel.innerHTML = `<option value="All">All sectors</option>` + buckets.map(b => `<option ${state.mkt.sector===b?'selected':''}>${b}</option>`).join('');
+  sel.value = state.mkt.sector;
+  sel.addEventListener('change', e => { state.mkt.sector = e.target.value; renderMarketRows(); });
+}
+
+function renderMarketRows() {
+  const body = $('#mktBody'); if (!body) return;
+  const p = activePortfolio();
+  let list = companiesForIndex(p.index);
+
+  const q = state.mkt.q.trim().toUpperCase();
+  if (q) list = list.filter(r => r.symbol.includes(q) || (r.name||'').toUpperCase().includes(q));
+  if (state.mkt.sector !== 'All') list = list.filter(r => mapSector(r.sector) === state.mkt.sector);
+
+  const sort = state.mkt.sort;
+  list = list.slice().sort((a,b) =>
+    sort === 'price'  ? b.price - a.price :
+    sort === 'symbol' ? a.symbol.localeCompare(b.symbol) :
+                        (b.changePct||0) - (a.changePct||0));
+
+  const owned = new Set(state.holdings.map(h => h.symbol));
+  const rows = list.map(r => {
+    const cls = r.changePct >= 0 ? 'gain' : 'loss';
+    return `<tr>
+      <td><a href="${psxUrl(r.symbol)}" target="_blank" rel="noopener" title="View ${escapeHtml(r.symbol)} on PSX"><span class="sym">${escapeHtml(r.symbol)}</span> <i class="ti ti-external-link" style="font-size:10px;color:var(--ink-soft)"></i></a>${owned.has(r.symbol)?' <span class="owned-badge">● owned</span>':''}</td>
+      <td class="muted" style="max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(r.name)}</td>
+      <td><span class="sec">${escapeHtml(mapSector(r.sector))}</span></td>
+      <td class="mono">${fmt(r.price)}</td>
+      <td class="mono ${cls}">${pct(r.changePct)}</td>
+      <td class="row-actions"><button class="btn sm" onclick="marketAdd('${escapeHtml(r.symbol)}')"><i class="ti ti-plus"></i> Add</button></td>
+    </tr>`;
+  }).join('');
+
+  const filtered = q || state.mkt.sector !== 'All';
+  body.innerHTML = list.length ? `
+    <div class="table-wrap mkt-scroll"><table>
+      <thead><tr><th>Symbol</th><th>Company</th><th>Sector</th><th>Price</th><th>Chg%</th><th></th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table></div>
+    <div class="mkt-foot muted">${list.length} ${list.length===1?'company':'companies'}${filtered?' · filtered':''}</div>
+  ` : `<div class="empty"><i class="ti ti-search-off"></i><h4>No matches</h4><p>Try a different search or sector.</p></div>`;
+}
+
+function marketAdd(symbol) {
+  const r = quoteFor(symbol);
+  addHoldingModal(r ? { symbol:r.symbol, sector:mapSector(r.sector), price:r.price } : { symbol });
+}
+
+async function refreshMarket() {
+  const btn = $('#mktRefresh');
+  if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spin"></span>'; }
+  try {
+    await loadMarket(true);
+    buildSectorFilter(activePortfolio().index);
+    renderMarketRows();
+    toast('Market refreshed','ok');
+  } catch(e) { toast(e.message,'err'); }
 }
 
 /* ── Tab: Add Investment ───────────────────────── */
@@ -518,7 +639,7 @@ function portfolioModal(existing) {
     <div class="sub">Tracker · isolated book</div>
     <div class="form-grid">
       <div class="field full"><label>Name</label><input id="pName" type="text" placeholder="e.g. Long-term KSE-100" value="${ed ? escapeHtml(ed.name) : ''}"/></div>
-      <div class="field"><label>Index</label><select id="pIndex">${INDEXES.map(i=>`<option ${ed && ed.index===i ? 'selected' : ''}>${i}</option>`).join('')}</select></div>
+      <div class="field"><label>Index <span class="hint" id="pIndexHint"></span></label><select id="pIndex">${indexOptions(ed ? ed.index : 'KSE-100')}</select></div>
       <div class="field"><label>Monthly target (PKR)</label><input id="pTarget" type="number" placeholder="50000" value="${ed ? (ed.monthlyTarget||'') : ''}"/></div>
     </div>
     <div class="modal-actions">
@@ -526,6 +647,13 @@ function portfolioModal(existing) {
       <button class="btn" onclick="savePortfolio()"><i class="ti ti-check"></i> ${ed ? 'Save changes' : 'Create'}</button>
     </div>
   `);
+  // Upgrade the index list from live PSX data once it's available.
+  loadMarket().then(() => {
+    const sel = $('#pIndex'); if (!sel) return;
+    const cur = sel.value;
+    sel.innerHTML = indexOptions(cur);
+    const hint = $('#pIndexHint'); if (hint) hint.textContent = 'live from PSX';
+  }).catch(()=>{});
 }
 
 async function savePortfolio() {
@@ -565,64 +693,40 @@ async function deletePortfolio() {
   } catch(e){ toast(e.message,'err'); }
 }
 
-async function holdingModal() {
+/* Compact add-to-portfolio form. `prefill` = { symbol, sector, price } from the
+   Market browser, or {} for a manual custom symbol. */
+function addHoldingModal(prefill) {
+  prefill = prefill || {};
   const p = activePortfolio();
+  const sym = (prefill.symbol || '').toUpperCase();
+  const q = sym ? quoteFor(sym) : null;
+  const owned = state.holdings.find(h => h.symbol === sym);
+  const sector = prefill.sector || (q ? mapSector(q.sector) : 'Other');
+  const price = prefill.price || (q ? q.price : '');
+
   openModal(`
-    <h3>Add stock</h3>
-    <div class="sub">Position · ${escapeHtml(p.name)} · ${escapeHtml(p.index)}</div>
-    <div class="form-grid">
-      <div class="field full">
-        <label>Company <span class="hint" id="mktStatus">loading ${escapeHtml(p.index)} companies…</span></label>
-        <input id="hSym" list="mktList" type="text" placeholder="Search symbol or company" autocomplete="off" style="text-transform:uppercase"/>
-        <datalist id="mktList"></datalist>
-        <div class="quote-line hide" id="quoteLine"></div>
-      </div>
-      <div class="field"><label>Sector</label><select id="hSec">${SECTORS.map(s=>`<option>${s}</option>`).join('')}</select></div>
-      <div class="field"><label>Shares</label><input id="hShares" type="number" step="1"/></div>
-      <div class="field"><label>Avg cost</label><input id="hCost" type="number" step="0.01"/></div>
-      <div class="field"><label>Current price</label><input id="hPrice" type="number" step="0.01"/></div>
+    <h3>${sym ? 'Add ' + escapeHtml(sym) : 'Add custom symbol'}</h3>
+    <div class="sub">${escapeHtml(p.name)} · ${escapeHtml(p.index)}</div>
+    ${q ? `<div class="quote-line">
+        <span class="px">${fmt(q.price)}</span>
+        <span class="${q.changePct>=0?'gain':'loss'}">${pct(q.changePct)}</span>
+        <span class="muted">${escapeHtml(q.name)}</span>
+        <a href="${psxUrl(sym)}" target="_blank" rel="noopener" style="margin-left:auto;white-space:nowrap">PSX <i class="ti ti-external-link" style="font-size:11px"></i></a>
+      </div>` : ''}
+    ${owned ? `<div class="hint" style="margin:10px 0 0;color:var(--info)">You own ${fmtN(owned.shares)} @ ${fmt(owned.avgCost)} — adding will average your cost.</div>` : ''}
+    <div class="form-grid" style="margin-top:14px">
+      <div class="field"><label>Symbol</label><input id="hSym" type="text" value="${escapeHtml(sym)}" placeholder="e.g. HBL" style="text-transform:uppercase" ${sym?'readonly':''}/></div>
+      <div class="field"><label>Sector</label><select id="hSec">${SECTORS.map(s=>`<option ${s===sector?'selected':''}>${s}</option>`).join('')}</select></div>
+      <div class="field"><label>Shares</label><input id="hShares" type="number" step="1" placeholder="100"/></div>
+      <div class="field"><label>Avg cost (PKR)</label><input id="hCost" type="number" step="0.01" placeholder="your buy price"/></div>
+      <div class="field full"><label>Current price (PKR)</label><input id="hPrice" type="number" step="0.01" value="${price}"/></div>
     </div>
     <div class="modal-actions">
       <button class="btn ghost" onclick="closeModal()">Cancel</button>
-      <button class="btn" onclick="saveHolding()"><i class="ti ti-check"></i> Save</button>
+      <button class="btn" onclick="saveHolding()"><i class="ti ti-check"></i> Add to portfolio</button>
     </div>
   `);
-
-  // Populate the live company list for this portfolio's index.
-  try {
-    await loadMarket();
-    const list = companiesForIndex(p.index);
-    const dl = $('#mktList');
-    if (dl) dl.innerHTML = list.map(c =>
-      `<option value="${escapeHtml(c.symbol)}">${escapeHtml(c.symbol)} — ${escapeHtml(c.name)}${c.sector?' · '+escapeHtml(c.sector):''}</option>`
-    ).join('');
-    const st = $('#mktStatus');
-    if (st) st.textContent = list.length ? `${list.length} live ${p.index} companies` : 'live list unavailable — type manually';
-  } catch (e) {
-    const st = $('#mktStatus'); if (st) st.textContent = 'live list unavailable — type manually';
-  }
-
-  // When a symbol is chosen, auto-fill sector + current price from the live quote.
-  const symInput = $('#hSym');
-  if (symInput) symInput.addEventListener('input', () => {
-    const sym = symInput.value.trim().toUpperCase();
-    const q = quoteFor(sym);
-    const ql = $('#quoteLine');
-    if (q) {
-      $('#hSec').value = mapSector(q.sector);
-      if (q.price > 0) $('#hPrice').value = q.price;
-      if (ql) {
-        ql.classList.remove('hide');
-        const cls = q.changePct >= 0 ? 'gain' : 'loss';
-        ql.innerHTML = `<span class="px">${escapeHtml(q.symbol)} · ${fmt(q.price)}</span>
-          <span class="${cls}">${pct(q.changePct)}</span>
-          <span class="muted">${escapeHtml(q.name)}</span>
-          <a href="${psxUrl(q.symbol)}" target="_blank" rel="noopener" style="margin-left:auto;white-space:nowrap">View on PSX <i class="ti ti-external-link" style="font-size:11px"></i></a>`;
-      }
-    } else if (ql) {
-      ql.classList.add('hide');
-    }
-  });
+  setTimeout(() => { const el = $('#hShares'); if (el) el.focus(); }, 50);
 }
 
 async function saveHolding() {
@@ -650,7 +754,9 @@ async function saveHolding() {
       state.holdings.push({ ...saved, shares:+saved.shares, avgCost:+saved.avgCost, currPrice:+saved.currPrice });
       toast('Holding added','ok');
     }
-    closeModal(); renderHoldings();
+    closeModal();
+    // Re-render whichever tab we're on (Market shows the updated "owned" badge).
+    if (state.tab === 'market') renderMarketRows(); else renderHoldings();
   } catch(e){ toast(e.message,'err'); }
 }
 
@@ -692,10 +798,13 @@ window.addEventListener('load', () => {
 // expose for inline handlers
 window.deleteHolding = deleteHolding;
 window.deleteInvestment = deleteInvestment;
-window.holdingModal = holdingModal;
+window.addHoldingModal = addHoldingModal;
 window.portfolioModal = portfolioModal;
 window.closeModal = closeModal;
 window.savePortfolio = savePortfolio;
 window.saveHolding = saveHolding;
 window.logInvestment = logInvestment;
 window.refreshPrices = refreshPrices;
+window.gotoMarket = gotoMarket;
+window.marketAdd = marketAdd;
+window.refreshMarket = refreshMarket;

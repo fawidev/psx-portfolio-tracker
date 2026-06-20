@@ -7,7 +7,9 @@
   --line:      #d8d2c2;
   --line-2:    #c4bda9;
   --card:      #fbf9f3;
-  --accent:    #d94a1f;        /* signal vermilion */
+  --accent:    #d94a1f;        /* signal vermilion (data accent) */
+  --btn:       #157a4e;        /* action green (white text passes AA) */
+  --btn-hover: #0f6440;
   --gain:      #1d9e75;
   --loss:      #a32d2d;
   --info:      #378add;
@@ -21,7 +23,7 @@
 [data-theme="dark"]{
   --bg:#0e0e0c; --bg-2:#171714; --ink:#f1ece1; --ink-soft:#9a9486;
   --line:#2a2925; --line-2:#3a3833; --card:#161613;
-  --accent:#ff6a3d; --gain:#3fd29c; --loss:#ff6b6b; --info:#6fb0ff; --gold:#e0b865;
+  --accent:#ff6a3d; --btn:#1f9e66; --btn-hover:#27b576; --gain:#3fd29c; --loss:#ff6b6b; --info:#6fb0ff; --gold:#e0b865;
 }
 
 /* ─────────────  BASE  ───────────── */
@@ -118,7 +120,7 @@ hr{border:none;border-top:1px solid var(--line);margin:0}
   font:500 13px var(--sans); transition:.15s;
 }
 .chip:hover{border-color:var(--ink-soft)}
-.chip.active{background:var(--ink); color:var(--bg); border-color:var(--ink)}
+.chip.active{background:var(--btn); color:#fff; border-color:var(--btn)}
 .chip .idx{font:500 10px var(--mono); letter-spacing:.1em; opacity:.7}
 .chip-new{border-style:dashed; color:var(--ink-soft)}
 .chip-new:hover{color:var(--accent); border-color:var(--accent)}
@@ -203,16 +205,18 @@ td .sec{font:500 10px var(--mono); letter-spacing:.1em; text-transform:uppercase
 .cell-input:focus{outline:none; border-color:var(--accent)}
 .row-actions button{color:var(--ink-soft); padding:6px}
 .row-actions button:hover{color:var(--loss)}
+.row-actions .btn{color:#fff; padding:6px 10px}        /* keep green Add buttons white-on-green */
+.row-actions .btn:hover{color:#fff}
 
 /* ─────────────  BUTTONS  ───────────── */
 .btn{
   display:inline-flex; align-items:center; gap:6px;
-  padding:9px 14px; border:1px solid var(--ink); background:var(--ink); color:var(--bg);
+  padding:9px 14px; border:1px solid var(--btn); background:var(--btn); color:#fff;
   border-radius:8px; font:600 13px var(--sans); transition:.15s;
 }
-.btn:hover{background:var(--accent); border-color:var(--accent); color:#fff}
+.btn:hover{background:var(--btn-hover); border-color:var(--btn-hover); color:#fff}
 .btn.ghost{background:transparent; color:var(--ink); border-color:var(--line)}
-.btn.ghost:hover{border-color:var(--ink); background:transparent; color:var(--accent)}
+.btn.ghost:hover{border-color:var(--btn); background:transparent; color:var(--btn)}
 .btn.danger{background:transparent; color:var(--loss); border-color:var(--loss)}
 .btn.danger:hover{background:var(--loss); color:#fff}
 .btn.sm{padding:6px 10px; font-size:12px}
@@ -298,6 +302,17 @@ td .sec{font:500 10px var(--mono); letter-spacing:.1em; text-transform:uppercase
 .bar-item .tr{flex:1; height:8px; background:var(--bg-2); border-radius:999px; overflow:hidden; border:1px solid var(--line)}
 .bar-item .fl{height:100%; background:var(--accent)}
 .bar-item .pc{width:50px; text-align:right; font-family:var(--mono); font-size:11px; color:var(--ink-soft)}
+
+/* ─────────────  MARKET BROWSER  ───────────── */
+.mkt-controls{display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-bottom:14px}
+.mkt-controls .search{flex:1; min-width:200px; padding:9px 12px; background:var(--card); border:1px solid var(--line); border-radius:8px; font:500 14px var(--sans)}
+.mkt-controls select{padding:9px 12px; background:var(--card); border:1px solid var(--line); border-radius:8px; font:500 13px var(--sans)}
+.mkt-controls .search:focus, .mkt-controls select:focus{outline:none; border-color:var(--accent)}
+.mkt-scroll{max-height:62vh; overflow:auto}
+.mkt-scroll thead th{position:sticky; top:0; z-index:1}
+.owned-badge{font:500 10px var(--mono); letter-spacing:.06em; color:var(--info)}
+.mkt-foot{padding:12px; font:500 10px var(--mono); letter-spacing:.16em; text-transform:uppercase; border-top:1px solid var(--line)}
+.mkt-controls .btn.sm i{font-size:15px}
 
 /* footnote */
 .footnote{margin-top:48px; padding-top:20px; border-top:1px solid var(--line);

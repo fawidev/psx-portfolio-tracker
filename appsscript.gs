@@ -78,6 +78,9 @@ function handleRequest(e) {
       case 'saveInvestment':  result = saveInvestment(userEmail, params); break;
       case 'deleteInvestment':result = deleteInvestment(userEmail, params); break;
 
+      // Live PSX market data (proxied + parsed server-side; cached ~10 min)
+      case 'getMarketWatch':  result = getMarketWatch(); break;
+
       default:
         return jsonOut({ success: false, error: 'Unknown action: ' + action });
     }
@@ -393,6 +396,76 @@ function deleteInvestment(userEmail, params) {
   var existing = findOwned(rows, id, userEmail);
   if (existing) deleteRowByNumber('Investments', existing.__row);
   return { id: id };
+}
+
+// ----------------------------------------------------------------------------
+// Live PSX market data
+// ----------------------------------------------------------------------------
+
+/**
+ * Fetch + parse the PSX data portal market watch, enriched with company names
+ * and sector names from the /symbols endpoint. Cached ~10 minutes.
+ * Returns: [{ symbol, name, sector, indexes:[...], price, change, changePct }]
+ */
+function getMarketWatch() {
+  var cache = CacheService.getScriptCache();
+  var cached = cache.get('marketwatch');
+  if (cached) return JSON.parse(cached);
+
+  var opts = { muteHttpExceptions: true, headers: { 'User-Agent': 'Mozilla/5.0' } };
+
+  // Company name + friendly sector name keyed by symbol.
+  var meta = {};
+  try {
+    var syms = JSON.parse(UrlFetchApp.fetch('https://dps.psx.com.pk/symbols', opts).getContentText());
+    syms.forEach(function (s) { meta[s.symbol] = { name: s.name, sector: s.sectorName }; });
+  } catch (e) { /* names/sectors are best-effort */ }
+
+  var html = UrlFetchApp.fetch('https://dps.psx.com.pk/market-watch', opts).getContentText();
+  var rows = parseMarketWatch(html, meta);
+
+  // CacheService caps a single value at 100KB — skip caching if it overflows.
+  try { cache.put('marketwatch', JSON.stringify(rows), 600); } catch (e) {}
+  return rows;
+}
+
+function parseMarketWatch(html, meta) {
+  var out = [];
+  var trs = html.split('<tr');
+  for (var i = 0; i < trs.length; i++) {
+    var tr = trs[i];
+    if (tr.indexOf('data-search=') === -1) continue;
+
+    var symMatch = tr.match(/data-search="([^"]+)"/);
+    if (!symMatch) continue;
+    var symbol = symMatch[1];
+
+    // Pull each <td>'s text content, tags stripped.
+    var tds = [], re = /<td[^>]*>([\s\S]*?)<\/td>/g, m;
+    while ((m = re.exec(tr)) !== null) {
+      tds.push(m[1].replace(/<[^>]*>/g, '').replace(/&amp;/g, '&').trim());
+    }
+    if (tds.length < 8) continue;
+
+    // [0]=symbol [1]=sectorCode [2]=listedIn [3]=ldcp [4]=open [5]=high [6]=low [7]=current [8]=change [9]=change% [10]=volume
+    var listedIn = (tds[2] || '').split(',').map(function (x) { return x.trim(); }).filter(Boolean);
+    var ldcp    = parseFloat((tds[3] || '').replace(/,/g, '')) || 0;
+    var current = parseFloat((tds[7] || '').replace(/,/g, '')) || 0;
+    var change  = parseFloat((tds[8] || '').replace(/[^0-9.\-]/g, '')) || 0;
+    var changePct = parseFloat((tds[9] || '').replace(/[^0-9.\-]/g, '')) || 0;
+
+    var info = meta[symbol] || {};
+    out.push({
+      symbol: symbol,
+      name: info.name || symbol,
+      sector: info.sector || '',
+      indexes: listedIn,
+      price: current || ldcp,
+      change: change,
+      changePct: changePct
+    });
+  }
+  return out;
 }
 
 // ----------------------------------------------------------------------------

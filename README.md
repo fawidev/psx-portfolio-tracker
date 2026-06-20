@@ -17,13 +17,20 @@ hosted for free on **GitHub Pages**.
 ## What you'll deliver
 
 ```
-psx-tracker/
-  index.html        ← the entire app (HTML + CSS + JS)
-  appsscript.gs     ← Google Apps Script backend code
-  README.md         ← this file
+psx-portfolio-tracker/
+  index.html      ← page markup (links the css + js)
+  styles.css      ← all styling
+  app.js          ← all app logic
+  config.js       ← YOUR two settings live here (the only file you edit)
+  appsscript.gs   ← Google Apps Script backend code
+  README.md       ← this file
 ```
 
-You only ever deploy `index.html`. The `appsscript.gs` code is pasted into Google Apps Script.
+You upload `index.html`, `styles.css`, `app.js`, and `config.js` to your repo. The
+`appsscript.gs` code is pasted into Google Apps Script (not uploaded to GitHub).
+
+> Still 100% static — no build step. GitHub Pages serves the `.css`/`.js` files directly.
+> During setup you only ever edit **`config.js`**.
 
 ---
 
@@ -101,16 +108,16 @@ You do **not** need to be a programmer. Follow each step in order.
 
 ### Part C — Configure and publish the app
 
-#### 7. Fill in the two placeholders in `index.html`
-Open `index.html` in any text editor and find this block near the top of the `<script>`:
+#### 7. Fill in the two values in `config.js`
+Open **`config.js`** (the only file you edit) and replace the two values:
 
 ```js
-const APPS_SCRIPT_URL  = 'PASTE_YOUR_APPS_SCRIPT_WEB_APP_URL_HERE';
-const GOOGLE_CLIENT_ID = 'PASTE_YOUR_GOOGLE_OAUTH_CLIENT_ID_HERE';
+const APPS_SCRIPT_URL  = 'PASTE_YOUR_APPS_SCRIPT_WEB_APP_URL_HERE';   // Web app URL from step 3 (ends in /exec)
+const GOOGLE_CLIENT_ID = 'PASTE_YOUR_GOOGLE_OAUTH_CLIENT_ID_HERE';    // Client ID from step 6
 ```
 
-- Replace `PASTE_YOUR_APPS_SCRIPT_WEB_APP_URL_HERE` with the **Web app URL** from step 3.
-- Replace `PASTE_YOUR_GOOGLE_OAUTH_CLIENT_ID_HERE` with the **Client ID** from step 6.
+- `APPS_SCRIPT_URL` → the **Web app URL** from step 3 (must end in `/exec`).
+- `GOOGLE_CLIENT_ID` → the **Client ID** from step 6 (ends in `.apps.googleusercontent.com`).
 
 Save the file. (Keep the quotes!)
 
@@ -119,10 +126,13 @@ Save the file. (Keep the quotes!)
 2. Click **+ → New repository**.
 3. **Repository name:** `psx-tracker`, set it to **Public**, click **Create repository**.
 
-#### 9. Upload `index.html`
+#### 9. Upload the app files
 1. On the repo page, click **Add file → Upload files**.
-2. Drag in your edited `index.html`.
+2. Drag in **all four** files: `index.html`, `styles.css`, `app.js`, `config.js`.
 3. Click **Commit changes**.
+
+> They must sit at the repo root (next to each other), since `index.html` loads
+> `styles.css`, `config.js`, and `app.js` by relative path.
 
 #### 10. Turn on GitHub Pages
 1. In the repo, go to **Settings → Pages**.
@@ -154,6 +164,26 @@ Open your GitHub Pages URL, click **Sign in with Google**, and start tracking.
 - Switch portfolios anytime with the chips at the top. Each portfolio is fully isolated.
 
 ---
+
+## Live PSX market data
+
+When adding a stock, the **Add stock** dialog shows a searchable list of the **live companies
+in that portfolio's index** (KSE-100, KMI-30, etc.) — picking one auto-fills its **sector and
+current price**. The **Holdings** tab also has a **⟳ Refresh prices** button that pulls the
+latest prices for all your positions in one click and recalculates P&L.
+
+How it works: your Apps Script backend fetches the public **PSX Data Portal**
+(`dps.psx.com.pk`) server-side, parses it, caches it ~10 minutes, and serves clean JSON to the
+app. (A static site can't fetch PSX directly because of browser CORS — the backend does it.)
+
+Notes:
+- Prices are **last-trade / last-close** from PSX's public portal — great for portfolio
+  planning, not real-time tick data.
+- It relies on PSX's public site layout; if they change it, the parser may need a small tweak.
+
+> ⚠️ This feature needs the latest `appsscript.gs`. If you set up the backend before this was
+> added, re-paste `appsscript.gs`, **Save**, then **Deploy → Manage deployments → ✏️ Edit →
+> Version: New version → Deploy**.
 
 ## Troubleshooting
 
